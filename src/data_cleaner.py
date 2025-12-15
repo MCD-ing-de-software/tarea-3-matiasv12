@@ -1,143 +1,331 @@
-"""Data cleaning utilities commonly needed in data science projects.
-
-This module defines the :class:`DataCleaner` class, which groups simple
-DataFrame transformations that are independent from any specific model.
-These functions are ideal for teaching classic unit testing in a data
-science context.
-"""
-
-from typing import Iterable
-import pandas as pd
-from pandas.api import types as pdt
+﻿import pandas as pd
+import numpy as np
 
 
 class DataCleaner:
-    """Utility class for common :class:`pandas.DataFrame` cleaning operations.
+    """Clase para limpieza y preprocesamiento de DataFrames de Pandas."""
 
-    The methods in this class are intentionally small and focused so they
-    can be tested independently. None of them rely on a trained model or
-    on external services, which makes them good candidates for unit tests.
-    """
-
-    def drop_invalid_rows(self, df: pd.DataFrame, cols: Iterable[str]) -> pd.DataFrame:
-        """Return a copy of ``df`` without rows that have missing values.
-
-        Parameters
-        ----------
-        df:
-            Input DataFrame to clean.
-        cols:
-            Iterable of column names. Any row that has a missing value
-            (NaN or None) in *any* of these columns will be removed.
-
-        Returns
-        -------
-        cleaned_df:
-            A new DataFrame with the same columns as ``df`` but with
-            fewer rows if some contained missing values in the selected
-            columns.
-
-        Raises
-        ------
-        KeyError
-            If any of the requested columns is not present in ``df``.
-
-        Notes
-        -----
-        This method does not modify the input DataFrame in-place.
+    def remove_whitespace(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Elimina espacios en blanco al inicio y final de strings en todas las columnas object.
+        
+        Args:
+            df: DataFrame a procesar
+            
+        Returns:
+            DataFrame con strings sin espacios en blanco
         """
-        missing = [c for c in cols if c not in df.columns]
-        if missing:
-            raise KeyError(f"Columns not found in DataFrame: {missing}")
-
-        return df.dropna(subset=list(cols))
-
-    def trim_strings(self, df: pd.DataFrame, cols: Iterable[str]) -> pd.DataFrame:
-        """Strip leading and trailing whitespace from string columns.
-
-        Parameters
-        ----------
-        df:
-            Input DataFrame.
-        cols:
-            Iterable of column names that are expected to contain text.
-
-        Returns
-        -------
-        trimmed_df:
-            A new DataFrame where the specified columns have their
-            string values stripped using :meth:`str.strip`.
-
-        Raises
-        ------
-        KeyError
-            If any of the requested columns is not present in ``df``.
-        TypeError
-            If any requested column is not of a string dtype.
-
-        Notes
-        -----
-        The original DataFrame is not modified; a copy is returned.
-        """
-        cols = list(cols)
-        missing = [c for c in cols if c not in df.columns]
-        if missing:
-            raise KeyError(f"Columns not found in DataFrame: {missing}")
-
-        non_string = [c for c in cols if not pdt.is_string_dtype(df[c])]
-        if non_string:
-            raise TypeError(f"Columns are not string dtype: {non_string}")
-
         result = df.copy()
-        for c in cols:
-            result[c] = result[c].str.strip()
+        
+        # Aplicar strip solo a columnas de tipo object/string
+        for col in result.select_dtypes(include=['object']).columns:
+            result[col] = result[col].str.strip()
+        
         return result
 
-    def remove_outliers_iqr(
-        self,
-        df: pd.DataFrame,
-        col: str,
-        factor: float = 1.5,
-    ) -> pd.DataFrame:
-        """Remove rows considered outliers in a numeric column using the IQR rule.
-
-        The interquartile range (IQR) is defined as Q3 - Q1, where Q1 and Q3
-        are the 25th and 75th percentiles. Values are considered outliers if
-        they are below ``Q1 - factor * IQR`` or above ``Q3 + factor * IQR``.
-
-        Parameters
-        ----------
-        df:
-            Input DataFrame.
-        col:
-            Name of the numeric column on which to detect outliers.
-        factor:
-            Multiplier for the IQR. The traditional boxplot rule uses 1.5.
-
-        Returns
-        -------
-        filtered_df:
-            A new DataFrame with the same columns as ``df`` but with rows
-            containing outliers in ``col`` removed.
-
-        Raises
-        ------
-        KeyError
-            If ``col`` is not present in ``df``.
-        TypeError
-            If ``col`` is not numeric.
+    def drop_nulls(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Elimina filas con valores faltantes en cualquier columna.
+        
+        Args:
+            df: DataFrame a limpiar
+            
+        Returns:
+            DataFrame sin filas con valores faltantes
         """
-        if col not in df.columns:
-            raise KeyError(f"Column '{col}' not found in DataFrame")
+        return df.dropna().copy()
 
-        if not pdt.is_numeric_dtype(df[col]):
-            raise TypeError(f"Column '{col}' must be numeric to compute IQR")
+    def fill_nulls_numeric(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Rellena valores faltantes con la media de la columna numérica.
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna numérica
+            
+        Returns:
+            DataFrame con valores faltantes rellenados con la media
+            
+        Raises:
+            KeyError: Si la columna no existe
+            TypeError: Si la columna no es numérica
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            raise TypeError(f"Column '{column}' is not numeric")
+        
+        result = df.copy()
+        mean_val = result[column].mean()
+        result[column] = result[column].fillna(mean_val)
+        
+        return result
 
-        q1 = df[col].quantile(0.25)
-        q3 = df[col].quantile(0.75)
-        iqr = q3 - q1
-        lower = q1 - factor * iqr
-        upper = q3 + factor * iqr
+    def remove_outliers_iqr(self, df: pd.DataFrame, column: str, factor: float = 1.5) -> pd.DataFrame:
+        """Elimina outliers usando el método del rango intercuartílico (IQR).
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna numérica
+            factor: Factor multiplicador del IQR (default 1.5)
+            
+        Returns:
+            DataFrame sin outliers en la columna especificada
+            
+        Raises:
+            KeyError: Si la columna no existe
+            TypeError: Si la columna no es numérica
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            raise TypeError(f"Column '{column}' is not numeric")
+        
+        # Calcular IQR solo con valores válidos (no NaN)
+        valid_values = df[column].dropna()
+        
+        if len(valid_values) == 0:
+            return df.copy()
+        
+        Q1 = valid_values.quantile(0.25)
+        Q3 = valid_values.quantile(0.75)
+        IQR = Q3 - Q1
+        
+        lower_bound = Q1 - factor * IQR
+        upper_bound = Q3 + factor * IQR
+        
+        # Mantener valores dentro del rango O valores NaN
+        mask = ((df[column] >= lower_bound) & (df[column] <= upper_bound)) | df[column].isna()
+        
+        return df[mask].copy()
 
-        mask = (df[col] >= lower) & (df[col] <= upper)
-        return df.loc[mask].copy()
+    def drop_invalid_rows(self, df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+        """Elimina filas con valores faltantes en las columnas especificadas.
+        
+        Args:
+            df: DataFrame a limpiar
+            columns: Lista de nombres de columnas a verificar
+            
+        Returns:
+            DataFrame sin filas con valores faltantes en las columnas especificadas
+            
+        Raises:
+            KeyError: Si alguna columna no existe en el DataFrame
+        """
+        for col in columns:
+            if col not in df.columns:
+                raise KeyError(f"Column '{col}' not found in DataFrame")
+        
+        return df.dropna(subset=columns).copy()
+
+    def trim_strings(self, df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+        """Elimina espacios en blanco al inicio y final de strings.
+        
+        Args:
+            df: DataFrame a procesar
+            columns: Lista de columnas de tipo string a limpiar
+            
+        Returns:
+            DataFrame con strings sin espacios en blanco
+            
+        Raises:
+            KeyError: Si alguna columna no existe en el DataFrame
+            TypeError: Si alguna columna no es de tipo string/object
+        """
+        result = df.copy()
+        
+        for col in columns:
+            if col not in df.columns:
+                raise KeyError(f"Column '{col}' not found in DataFrame")
+            
+            if pd.api.types.is_numeric_dtype(df[col]):
+                raise TypeError(f"Column '{col}' is not of string type")
+            
+            if not (pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col])):
+                raise TypeError(f"Column '{col}' is not of string type")
+            
+            result[col] = df[col].str.strip()
+        
+        return result
+
+    def normalize_column(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Normaliza una columna numérica usando Min-Max scaling (0-1).
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna a normalizar
+            
+        Returns:
+            DataFrame con la columna normalizada
+            
+        Raises:
+            KeyError: Si la columna no existe
+            TypeError: Si la columna no es numérica
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            raise TypeError(f"Column '{column}' is not numeric")
+        
+        result = df.copy()
+        
+        min_val = result[column].min()
+        max_val = result[column].max()
+        
+        if max_val == min_val:
+            result[column] = 0.0
+        else:
+            result[column] = (result[column] - min_val) / (max_val - min_val)
+        
+        return result
+
+    def standardize_column(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Estandariza una columna numérica usando Z-score (media=0, std=1).
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna a estandarizar
+            
+        Returns:
+            DataFrame con la columna estandarizada
+            
+        Raises:
+            KeyError: Si la columna no existe
+            TypeError: Si la columna no es numérica
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            raise TypeError(f"Column '{column}' is not numeric")
+        
+        result = df.copy()
+        
+        mean_val = result[column].mean()
+        std_val = result[column].std()
+        
+        if std_val == 0:
+            result[column] = 0.0
+        else:
+            result[column] = (result[column] - mean_val) / std_val
+        
+        return result
+
+    def fill_missing_with_mean(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Rellena valores faltantes con la media de la columna.
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna
+            
+        Returns:
+            DataFrame con valores faltantes rellenados
+            
+        Raises:
+            KeyError: Si la columna no existe
+            TypeError: Si la columna no es numérica
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            raise TypeError(f"Column '{column}' is not numeric")
+        
+        result = df.copy()
+        mean_val = result[column].mean()
+        result[column] = result[column].fillna(mean_val)
+        
+        return result
+
+    def fill_missing_with_median(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Rellena valores faltantes con la mediana de la columna.
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna
+            
+        Returns:
+            DataFrame con valores faltantes rellenados
+            
+        Raises:
+            KeyError: Si la columna no existe
+            TypeError: Si la columna no es numérica
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            raise TypeError(f"Column '{column}' is not numeric")
+        
+        result = df.copy()
+        median_val = result[column].median()
+        result[column] = result[column].fillna(median_val)
+        
+        return result
+
+    def fill_missing_with_mode(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Rellena valores faltantes con la moda de la columna.
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna
+            
+        Returns:
+            DataFrame con valores faltantes rellenados
+            
+        Raises:
+            KeyError: Si la columna no existe
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        result = df.copy()
+        mode_val = result[column].mode()
+        
+        if len(mode_val) > 0:
+            result[column] = result[column].fillna(mode_val[0])
+        
+        return result
+
+    def convert_to_datetime(self, df: pd.DataFrame, column: str, format: str = None) -> pd.DataFrame:
+        """Convierte una columna a tipo datetime.
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna
+            format: Formato de fecha (opcional)
+            
+        Returns:
+            DataFrame con la columna convertida a datetime
+            
+        Raises:
+            KeyError: Si la columna no existe
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        result = df.copy()
+        result[column] = pd.to_datetime(result[column], format=format, errors='coerce')
+        
+        return result
+
+    def encode_categorical(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Codifica una columna categórica usando Label Encoding.
+        
+        Args:
+            df: DataFrame a procesar
+            column: Nombre de la columna categórica
+            
+        Returns:
+            DataFrame con la columna codificada
+            
+        Raises:
+            KeyError: Si la columna no existe
+        """
+        if column not in df.columns:
+            raise KeyError(f"Column '{column}' not found in DataFrame")
+        
+        result = df.copy()
+        result[column] = pd.Categorical(result[column]).codes
+        
+        return result
